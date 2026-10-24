@@ -1,0 +1,8 @@
+*.exe
+*.o
+*.obj
+csopesy-log.txt
+tests.exe
+.vscode/
+.idea/
+MO1-SPECS.docx
