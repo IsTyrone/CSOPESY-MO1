@@ -219,7 +219,7 @@ Scheduling:
     the back of the ready queue.
   - Sleeping processes are moved back to the ready queue when their
     sleep count reaches zero, so they rejoin at the back.
-  - Dummy processes are generated at the start of every
+  - Dummy processes are generated at the end of every
     batch-process-freq-th cycle while the batch generator is running.
     Names that already exist are skipped (p01, p02, ... are incremented).
 

@@ -75,6 +75,7 @@ private:
 
     void generateProcessLocked();
     void wakeSleepingLocked();
+    void preemptExpiredLocked();
     void dispatchLocked();
     void executeLocked();
 

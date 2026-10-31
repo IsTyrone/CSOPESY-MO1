@@ -53,6 +53,31 @@ Instruction makeArithmetic(std::mt19937_64& rng, bool add) {
     return ins;
 }
 
+Instruction makeRandomInstruction(std::mt19937_64& rng, unsigned loopDepth) {
+    // At depth three only leaf instructions may be generated.
+    std::uniform_int_distribution<int> opcode(0, loopDepth < 3 ? 5 : 4);
+    switch (opcode(rng)) {
+    case 0: return makePrintDefault();
+    case 1: return makeDeclare(rng, pickVar(rng));
+    case 2: return makeArithmetic(rng, true);
+    case 3: return makeArithmetic(rng, false);
+    case 4: return makeSleep(rng);
+    default: {
+        Instruction ins;
+        ins.op = Op::FOR;
+        std::uniform_int_distribution<int> repeats(2, 3);
+        std::uniform_int_distribution<int> bodySize(1, 3);
+        ins.repeats = static_cast<uint64_t>(repeats(rng));
+        const int count = bodySize(rng);
+        ins.body.reserve(static_cast<size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            ins.body.push_back(makeRandomInstruction(rng, loopDepth + 1));
+        }
+        return ins;
+    }
+    }
+}
+
 } // namespace
 
 Program generateProgram(uint64_t minIns, uint64_t maxIns, std::mt19937_64& rng) {
@@ -74,23 +99,7 @@ Program generateProgram(uint64_t minIns, uint64_t maxIns, std::mt19937_64& rng) 
     }
 
     for (uint64_t i = 0; i < templateLen; ++i) {
-        if (i == 0) {
-            program.code.push_back(makeDeclare(rng, "x"));
-        } else if (i == 1) {
-            program.code.push_back(makeDeclare(rng, "y"));
-        } else if (i == 2 && templateLen > 2) {
-            program.code.push_back(makeDeclare(rng, "z"));
-        } else if (i % 23 == 7) {
-            program.code.push_back(makePrintDefault());
-        } else if (i % 31 == 13) {
-            program.code.push_back(makeSleep(rng));
-        } else if (i % 11 == 0) {
-            program.code.push_back(makeDeclare(rng, pickVar(rng)));
-        } else if (i % 2 == 0) {
-            program.code.push_back(makeArithmetic(rng, true));
-        } else {
-            program.code.push_back(makeArithmetic(rng, false));
-        }
+        program.code.push_back(makeRandomInstruction(rng, 0));
     }
 
     const bool hasPrint = std::any_of(

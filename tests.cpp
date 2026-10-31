@@ -442,14 +442,16 @@ void testSchedulerRoundRobin() {
 
     core.tickOnce();
     core.tickOnce();
-    // A used its 2-cycle quantum and was preempted.
-    CHECK(core.getProcessView("A").process.state == ProcessState::READY);
+    // A remains visible until its expired quantum rotates on the next tick.
+    CHECK(core.getProcessView("A").process.state == ProcessState::RUNNING);
+    CHECK_EQ(core.snapshot().coresUsed, 1);
     CHECK_EQ(core.getProcessView("A").process.currentLine, static_cast<uint64_t>(3));
 
     core.tickOnce();
     core.tickOnce();
-    // B used its quantum too.
-    CHECK(core.getProcessView("B").process.state == ProcessState::READY);
+    // B used its quantum too; A has not executed again yet.
+    CHECK(core.getProcessView("B").process.state == ProcessState::RUNNING);
+    CHECK(core.getProcessView("A").process.state == ProcessState::READY);
     CHECK_EQ(core.getProcessView("A").process.currentLine, static_cast<uint64_t>(3));
     CHECK_EQ(core.getProcessView("B").process.currentLine, static_cast<uint64_t>(3));
 
@@ -476,9 +478,14 @@ void testBatchGeneration() {
 
     core.tickOnce();
     CHECK(core.hasName("p01"));
+    CHECK(core.getProcessView("p01").process.state == ProcessState::READY);
+    CHECK_EQ(core.getProcessView("p01").process.currentLine, uint64_t(1));
+    CHECK(core.getProcessView("p01").process.logs.empty());
+    CHECK_EQ(core.snapshot().coresUsed, 0);
 
     core.tickOnce();
     CHECK(!core.hasName("p02"));
+    CHECK(core.getProcessView("p01").process.state != ProcessState::READY);
 
     core.tickOnce();
     CHECK(core.hasName("p02"));
@@ -509,6 +516,126 @@ void testBatchSkipsExistingNames() {
     core.tickOnce();
     CHECK(core.hasName("p02"));
     CHECK(!core.hasName("p01x"));
+}
+
+void testBatchEndOfTick() {
+    Config cfg = baseSchedulerConfig();
+    cfg.batchProcessFreq = 1;
+    SchedulerCore core(cfg, 10);
+    core.startBatch();
+    core.tickOnce();
+    CHECK(core.hasName("p01"));
+    CHECK(core.getProcessView("p01").process.state == ProcessState::READY);
+    CHECK(core.getProcessView("p01").process.logs.empty());
+    CHECK_EQ(core.snapshot().coresUsed, 0);
+    core.tickOnce();
+    CHECK(core.getProcessView("p01").process.state == ProcessState::FINISHED);
+    CHECK_EQ(core.getProcessView("p01").process.logs.size(), size_t(1));
+    CHECK(core.getProcessView("p02").process.state == ProcessState::READY);
+    core.stopBatch();
+    core.tickOnce();
+    CHECK(core.getProcessView("p02").process.state == ProcessState::FINISHED);
+    CHECK(!core.hasName("p03"));
+}
+
+void testRoundRobinUtilizationAndFairness() {
+    Config cfg = baseSchedulerConfig();
+    cfg.scheduler = "rr";
+    cfg.numCpu = 2;
+    cfg.quantumCycles = 1;
+    cfg.delayPerExec = 1;
+    SchedulerCore core(cfg, 11);
+    std::string error;
+    for (const char* name : {"A", "B", "C"}) {
+        CHECK(core.addProcess(name, program({printDefault(), printDefault()}), error));
+    }
+    core.tickOnce();
+    CHECK_EQ(core.snapshot().coresUsed, 2);
+    CHECK_EQ(core.snapshot().cpuUtilization, 100);
+    CHECK_EQ(core.snapshot().coresAvailable, 0);
+    CHECK_EQ(core.getProcessView("A").process.logs.size(), size_t(1));
+    CHECK_EQ(core.getProcessView("B").process.logs.size(), size_t(1));
+    CHECK(core.getProcessView("C").process.logs.empty());
+    core.tickOnce();
+    CHECK_EQ(core.snapshot().coresUsed, 2);
+    CHECK_EQ(core.getProcessView("C").process.logs.size(), size_t(1));
+    CHECK(core.getProcessView("B").process.state == ProcessState::READY);
+    // A busy-waits on its second turn; it cannot print twice in one tick.
+    CHECK_EQ(core.getProcessView("A").process.logs.size(), size_t(1));
+    for (int i = 0; i < 10; ++i) core.tickOnce();
+    CHECK(core.snapshot().active.empty());
+    CHECK_EQ(core.snapshot().finished.size(), size_t(3));
+    CHECK_EQ(core.snapshot().coresUsed, 0);
+    CHECK_EQ(core.snapshot().cpuUtilization, 0);
+
+    // A lone process must also stay visible with a one-cycle quantum.
+    SchedulerCore lone(cfg, 12);
+    CHECK(lone.addProcess("solo", program({printDefault(), printDefault()}), error));
+    lone.tickOnce();
+    CHECK_EQ(lone.snapshot().coresUsed, 1);
+    CHECK_EQ(lone.snapshot().cpuUtilization, 50);
+    lone.tickOnce();
+    CHECK_EQ(lone.snapshot().coresUsed, 1);
+    lone.tickOnce();
+    CHECK(lone.snapshot().active.empty());
+    CHECK_EQ(lone.snapshot().coresUsed, 0);
+}
+
+std::string describeInstructions(const std::vector<Instruction>& code,
+                                 unsigned depth, unsigned& maxDepth,
+                                 unsigned& seen) {
+    std::ostringstream out;
+    for (const Instruction& ins : code) {
+        seen |= 1u << static_cast<unsigned>(ins.op);
+        out << static_cast<int>(ins.op) << ':' << ins.a << ':' << ins.b
+            << ':' << ins.c << ':' << ins.repeats << '[';
+        if (ins.op == Op::FOR) {
+            maxDepth = std::max(maxDepth, depth + 1);
+            CHECK(!ins.body.empty());
+            CHECK(ins.repeats > 0);
+            out << describeInstructions(ins.body, depth + 1, maxDepth, seen);
+        }
+        out << ']';
+    }
+    return out.str();
+}
+
+void testRandomPrograms() {
+    unsigned seen = 0;
+    unsigned maxDepth = 0;
+    std::string previous;
+    bool varied = false;
+    for (uint64_t seed = 1; seed <= 16; ++seed) {
+        std::mt19937_64 rng(seed), replay(seed);
+        const Program generated = generateProgram(16, 32, rng);
+        const Program repeated = generateProgram(16, 32, replay);
+        CHECK(generated.totalLines >= 16 && generated.totalLines <= 32);
+        unsigned replayDepth = 0, replaySeen = 0;
+        const std::string description = describeInstructions(generated.code, 0, maxDepth, seen);
+        CHECK_EQ(generated.totalLines, repeated.totalLines);
+        CHECK_EQ(description, describeInstructions(repeated.code, 0, replayDepth, replaySeen));
+        if (!previous.empty() && description != previous) varied = true;
+        previous = description;
+
+        Config cfg = baseSchedulerConfig();
+        cfg.scheduler = "rr";
+        cfg.quantumCycles = 2;
+        SchedulerCore core(cfg, seed);
+        std::string error;
+        CHECK(core.addProcess("generated", generated, error));
+        int ticks = 0;
+        while (core.isActive("generated") && ticks++ < 20000) core.tickOnce();
+        const auto view = core.getProcessView("generated");
+        CHECK(view.process.state == ProcessState::FINISHED);
+        CHECK_EQ(view.process.currentLine, generated.totalLines);
+        CHECK(!view.process.logs.empty());
+        for (const auto& log : view.process.logs) {
+            CHECK(log.find("Hello world from generated!") != std::string::npos);
+        }
+    }
+    CHECK_EQ(seen, 63u); // All six instruction types occurred.
+    CHECK_EQ(maxDepth, 3u);
+    CHECK(varied);
 }
 
 void testDelay() {
@@ -685,8 +812,11 @@ int main() {
     testGeneratedProgram();
     testSchedulerFcfs();
     testSchedulerRoundRobin();
+    testRoundRobinUtilizationAndFairness();
     testBatchGeneration();
+    testBatchEndOfTick();
     testBatchSkipsExistingNames();
+    testRandomPrograms();
     testDelay();
     testSchedulerSleep();
     testSnapshot();

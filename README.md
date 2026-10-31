@@ -175,7 +175,7 @@ delay-per-exec 0
 
 ### Execution & Memory Rules
 * **Clamping (`uint16`)**: All process variables are unsigned 16-bit integers clamped to the range $[0, 65535]$. Additions saturate at $65535$ and subtractions clamp at $0$.
-* **Execution Rate & Busy-Waiting**: When `delay-per-exec` is $0$, a running process executes one instruction per CPU tick. When `delay-per-exec` $> 0$, the process remains on its assigned core and busy-waits for that many CPU cycles before completing each instruction.
+* **Execution Rate & Busy-Waiting**: When `delay-per-exec` is $0$, a running process executes one instruction per CPU tick. When `delay-per-exec` $> 0$, the process remains on its assigned core and busy-waits for that many CPU cycles between instructions, subject to RR preemption.
 * **Memory Lifecycle**: Variables are stored in process memory during execution and released once the process finishes. Logs, timestamps, and line counts are retained so finished processes can be inspected in `screen -ls` and `report-util`.
 
 ### Scheduling Algorithms

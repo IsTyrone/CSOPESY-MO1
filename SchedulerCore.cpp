@@ -29,14 +29,31 @@ void SchedulerCore::tickOnce() {
 
     ++m_tickCount;
 
+    preemptExpiredLocked();
+    wakeSleepingLocked();
+    dispatchLocked();
+    executeLocked();
+
+    // A newly generated process first becomes eligible on the next tick.
     if (m_batchRunning &&
         m_tickCount % m_config.batchProcessFreq == 0) {
         generateProcessLocked();
     }
+}
 
-    wakeSleepingLocked();
-    dispatchLocked();
-    executeLocked();
+void SchedulerCore::preemptExpiredLocked() {
+    if (m_config.scheduler != "rr") return;
+
+    // Keep the current owner visible between ticks, then rotate all expired
+    // cores before dispatch so no process executes twice in the same tick.
+    for (Core& slot : m_cores) {
+        if (!slot.proc || slot.quantumUsed < m_config.quantumCycles) continue;
+        slot.proc->setState(ProcessState::READY);
+        slot.proc->setCore(-1);
+        m_ready.push_back(slot.proc);
+        slot.proc.reset();
+        slot.quantumUsed = 0;
+    }
 }
 
 void SchedulerCore::generateProcessLocked() {
@@ -98,16 +115,6 @@ void SchedulerCore::executeLocked() {
         }
 
         ++slot.quantumUsed;
-
-        if (m_config.scheduler == "rr" &&
-            slot.quantumUsed >= m_config.quantumCycles &&
-            process->state() == ProcessState::RUNNING) {
-            process->setState(ProcessState::READY);
-            process->setCore(-1);
-            slot.proc.reset();
-            slot.quantumUsed = 0;
-            m_ready.push_back(process);
-        }
     }
 }
 
