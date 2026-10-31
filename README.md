@@ -1,11 +1,11 @@
 # CSOPESY MO1 - Process Scheduler and CLI Emulator
 
-* **Last Updated:** 10-24-2026
+* **Last Updated:** 10-31-2026
 * **Group Members:**
-  * Carlo Barreo
-  * Gaibril Kyle
-  * David Javier
-  * Tyrone Lee
+  * Carlo Gabriel Barreo
+  * Gaibril Kyle Gregorio
+  * David Lorenz Javier
+  * Tyrone Julius Lee
 
 ---
 
