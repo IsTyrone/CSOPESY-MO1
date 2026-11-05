@@ -116,7 +116,7 @@ At startup, the CSOPESY welcome banner is displayed and the main prompt appears.
   *(Note: Processes currently in the ready or sleeping state are listed with `Core: -`.)*
 
 * **`scheduler-start`** *(Alias: `scheduler-test`)*
-  Continuously generates new dummy processes (`p01`, `p02`, `p03`, ...) every `batch-process-freq` CPU cycles and places them into the ready queue.
+  Continuously generates new dummy processes (`p01`, `p02`, `p03`, ...) every `batch-process-freq` arrival intervals (50 ms each) and places them into the ready queue.
 
 * **`scheduler-stop`**
   Stops generating new dummy processes. Existing processes continue executing normally.
@@ -145,7 +145,7 @@ At startup, the CSOPESY welcome banner is displayed and the main prompt appears.
 | `num-cpu` | $[1, 128]$ | `4` | Number of available CPU cores. |
 | `scheduler` | `"fcfs"` \| `"rr"` | `"rr"` | CPU scheduling algorithm (First-Come, First-Served or Round-Robin). |
 | `quantum-cycles` | $[1, 2^{32}]$ | `5` | Time slice (in CPU cycles) per core for the Round-Robin scheduler. |
-| `batch-process-freq` | $[1, 2^{32}]$ | `1` | Frequency (in CPU cycles) at which `scheduler-start` creates new dummy processes. |
+| `batch-process-freq` | $[1, 2^{32}]$ | `1` | Frequency (in 50 ms arrival intervals) at which `scheduler-start` creates new dummy processes. |
 | `min-ins` | $[1, 2^{32}]$ | `1000` | Minimum number of instructions generated per process (`min-ins` $\le$ `max-ins`). |
 | `max-ins` | $[1, 2^{32}]$ | `2000` | Maximum number of instructions generated per process. |
 | `delay-per-exec` | $[0, 2^{32}]$ | `0` | Busy-wait delay (in CPU cycles) before executing the next instruction (`delays-per-exec` is also accepted). |
@@ -182,12 +182,13 @@ delay-per-exec 0
 * **First-Come, First-Served (`fcfs`)**: Non-preemptive; a process runs on its assigned core until it finishes all instructions or yields the CPU via `SLEEP`.
 * **Round-Robin (`rr`)**: Preemptive; a process runs until it finishes, yields via `SLEEP`, or exhausts its time slice (`quantum-cycles`), at which point it is preempted and placed at the back of the ready queue.
 * **Wake-up Handling**: Sleeping processes decrement their sleep counter each CPU tick and rejoin the back of the ready queue once their counter reaches $0$.
+* **Core Refill**: When a process sleeps or finishes, an available ready process is assigned immediately. Its first instruction executes on the next tick. Utilization reflects assigned cores; a core is idle when no ready process can fill it.
 
 ---
 
 ## 9. Timing Overrides & Reproducibility (Testing Utilities)
 
-By default, the background scheduler advances 1 CPU tick every **50 ms**. For faster demonstrations or automated grading checks, you can override the tick duration via CLI flags or environment variables (valid range: `1` to `10000` ms):
+By default, the background scheduler advances 1 CPU tick every **1 ms**. Process arrivals use a separate **50 ms** clock: `batch-process-freq 1` creates at most one process every 50 ms, while execution continues between arrivals. This prevents speeding up execution from also flooding the ready queue. If execution ticks are slower than 50 ms, arrivals are limited to one per execution tick, without catch-up bursts. You can override the execution tick duration via CLI flags or environment variables (valid range: `1` to `10000` ms):
 
 ```bat
 csopesy.exe --tick-ms 5
@@ -215,3 +216,9 @@ To build and execute the self-test suite, run:
 test.bat
 ```
 This compiles `tests.exe` from `tests.cpp` and runs deterministic checks covering `config.txt` parsing, `uint16` arithmetic clamping, `PRINT` formatting, `SLEEP` state transitions, 3-level nested `FOR` loops, FCFS and RR quantum preemption, `scheduler-start`/`scheduler-stop` batch generation, `delay-per-exec` busy-waiting, and UI report formatting.
+
+### Timed scheduler acceptance test
+
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\test-scenarios.ps1` after building to verify all three scenarios: eight-core draining after generation stops, one-core busy/idle gaps, and five 100% snapshots under sustained sixteen-core load followed by a utilization report. It uses isolated temporary configurations and leaves your `config.txt` unchanged. The cases run concurrently for about 40 seconds; captured output and the saved load report are written to `scheduler-*-test-*.txt` files.
+
+With the eight-core RR configuration (quantum 1, batch frequency 1, 100 instructions, delay 0), run `powershell -NoProfile -ExecutionPolicy Bypass -File .\test-timing.ps1` after building. It initializes, generates for 10 seconds, stops generation, waits 30 seconds, and checks for 0% utilization and all generated processes finished. Output is saved to `scheduler-timing-test-output.txt`. Use `-Executable csopesy-fixed.exe` when testing the separate build while an older emulator remains open. Windows execution uses a high-resolution waitable timer when available so 1 ms CPU cycles are not rounded to the ordinary system sleep interval.

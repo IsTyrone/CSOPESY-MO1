@@ -24,7 +24,7 @@ SchedulerCore::SchedulerCore(const Config& config, uint64_t seed)
     }
 }
 
-void SchedulerCore::tickOnce() {
+void SchedulerCore::tickOnce(bool arrivalTick) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     ++m_tickCount;
@@ -33,10 +33,15 @@ void SchedulerCore::tickOnce() {
     wakeSleepingLocked();
     dispatchLocked();
     executeLocked();
+    // Sleeping/finished processes release their cores during execution. Assign
+    // queued work immediately so cores do not appear idle until the next tick.
+    // Replacements execute next tick, preserving one step per core per cycle.
+    dispatchLocked();
 
     // A newly generated process first becomes eligible on the next tick.
-    if (m_batchRunning &&
-        m_tickCount % m_config.batchProcessFreq == 0) {
+    if (arrivalTick) ++m_arrivalTickCount;
+    if (arrivalTick && m_batchRunning &&
+        m_arrivalTickCount % m_config.batchProcessFreq == 0) {
         generateProcessLocked();
     }
 }

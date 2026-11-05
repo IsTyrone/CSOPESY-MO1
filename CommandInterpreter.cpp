@@ -246,7 +246,7 @@ void CommandInterpreter::handleSchedulerStart() {
 
     m_scheduler->core().startBatch();
     std::cout << "Scheduler started: one new process every "
-              << m_config.batchProcessFreq << " CPU cycle(s).\n";
+              << m_config.batchProcessFreq << " arrival interval(s) (50 ms each).\n";
 }
 
 void CommandInterpreter::handleSchedulerStop() {

@@ -123,7 +123,7 @@ specification; unknown parameters are ignored with a warning.
 
   scheduler-start
       Starts generating dummy processes, one every batch-process-freq
-      CPU cycles, named p01, p02, p03, ... ("scheduler-test" is accepted
+      arrival intervals (50 ms each), named p01, p02, p03, ... ("scheduler-test" is accepted
       as an alias).
 
   scheduler-stop
@@ -157,7 +157,7 @@ case-insensitive.
   num-cpu              1 - 128        4        Number of CPU cores
   scheduler            fcfs | rr      rr       Scheduling algorithm
   quantum-cycles       1 - 2^32       5        RR time slice, in cycles
-  batch-process-freq   1 - 2^32       1        Cycles between dummy
+  batch-process-freq   1 - 2^32       1        50 ms intervals between dummy
                                                 process creations
   min-ins              1 - 2^32       1000     Minimum instructions
   max-ins              1 - 2^32       2000     Maximum instructions
@@ -220,13 +220,13 @@ Scheduling:
   - Sleeping processes are moved back to the ready queue when their
     sleep count reaches zero, so they rejoin at the back.
   - Dummy processes are generated at the end of every
-    batch-process-freq-th cycle while the batch generator is running.
+    batch-process-freq-th arrival interval while the batch generator is running.
     Names that already exist are skipped (p01, p02, ... are incremented).
 
 ------------------------------------------------------------------------
 9. TIMING OVERRIDES AND REPRODUCIBILITY
 ------------------------------------------------------------------------
-The scheduler advances one cycle every 50 ms by default. For faster
+The scheduler advances one CPU cycle every 1 ms by default. Arrivals use a separate 50 ms clock (batch-process-freq counts arrival intervals). Slow execution ticks allow at most one arrival per tick, without catch-up bursts. For other
 demos or automated testing:
 
   csopesy.exe --tick-ms 5

@@ -49,7 +49,8 @@ class SchedulerCore {
 public:
     explicit SchedulerCore(const Config& config, uint64_t seed = 0);
 
-    void tickOnce();
+    // Execution always advances; arrivals advance only on an arrival-clock tick.
+    void tickOnce(bool arrivalTick = true);
 
     bool createProcess(const std::string& name, std::string& error);
     bool addProcess(const std::string& name, Program program, std::string& error);
@@ -94,6 +95,7 @@ private:
 
     bool m_batchRunning = false;
     uint64_t m_tickCount = 0;
+    uint64_t m_arrivalTickCount = 0;
     uint64_t m_nextId = 1;
     uint64_t m_nextProcessNumber = 1;
 };

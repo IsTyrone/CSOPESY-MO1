@@ -9,7 +9,10 @@
 
 class Scheduler {
 public:
-    Scheduler(const Config& config, int tickMs = 50, uint64_t seed = 0);
+    static constexpr int kDefaultTickMs = 1;
+    static constexpr int kArrivalTickMs = 50;
+
+    Scheduler(const Config& config, int tickMs = kDefaultTickMs, uint64_t seed = 0);
     ~Scheduler();
 
     Scheduler(const Scheduler&) = delete;

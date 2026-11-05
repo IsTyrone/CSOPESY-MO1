@@ -10,7 +10,7 @@
 namespace {
 
 int parseTickMs(int argc, char** argv, bool& explicitlySet) {
-    int tickMs = 50;
+    int tickMs = Scheduler::kDefaultTickMs;
     explicitlySet = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -24,7 +24,7 @@ int parseTickMs(int argc, char** argv, bool& explicitlySet) {
         }
     }
 
-    if (tickMs < 1) tickMs = 50;
+    if (tickMs < 1) tickMs = Scheduler::kDefaultTickMs;
     if (tickMs > 10000) tickMs = 10000;
     return tickMs;
 }

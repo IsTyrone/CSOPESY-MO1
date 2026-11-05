@@ -416,7 +416,8 @@ void testSchedulerFcfs() {
 
     core.tickOnce();
     CHECK(core.getProcessView("A").process.state == ProcessState::FINISHED);
-    CHECK(core.getProcessView("B").process.state == ProcessState::READY);
+    CHECK(core.getProcessView("B").process.state == ProcessState::RUNNING);
+    CHECK_EQ(core.getProcessView("B").process.currentLine, uint64_t{1});
 
     core.tickOnce();
     CHECK(core.getProcessView("B").process.state == ProcessState::RUNNING);
@@ -598,6 +599,78 @@ std::string describeInstructions(const std::vector<Instruction>& code,
         out << ']';
     }
     return out.str();
+}
+
+void testTimedBatchDrain() {
+    Config cfg = baseSchedulerConfig();
+    cfg.numCpu = 8;
+    cfg.scheduler = "rr";
+    cfg.quantumCycles = 1;
+    cfg.batchProcessFreq = 1;
+    cfg.minIns = cfg.maxIns = 100;
+    cfg.delayPerExec = 0;
+
+    // Model 10 s of arrivals followed by 30 s of draining, at 1 ms per
+    // execution tick and 50 ms per arrival interval, across different programs.
+    for (uint64_t seed = 1; seed <= 8; ++seed) {
+        SchedulerCore core(cfg, seed);
+        core.startBatch();
+        for (int ms = 1; ms <= 10000; ++ms) core.tickOnce(ms % 50 == 0);
+        const auto beforeStop = core.snapshot();
+        CHECK_EQ(beforeStop.active.size() + beforeStop.finished.size(), size_t{200});
+        core.stopBatch();
+        for (int ms = 1; ms <= 30000; ++ms) core.tickOnce(ms % 50 == 0);
+        const auto afterStop = core.snapshot();
+        CHECK(afterStop.active.empty());
+        CHECK_EQ(afterStop.finished.size(), size_t{200});
+        CHECK_EQ(afterStop.coresUsed, 0);
+        CHECK_EQ(afterStop.cpuUtilization, 0);
+        for (const auto& process : afterStop.finished) {
+            CHECK_EQ(process.linesOfCode, uint64_t{100});
+        }
+    }
+
+    // Execution ticks must not advance the arrival-frequency counter.
+    cfg.batchProcessFreq = 2;
+    SchedulerCore core(cfg, 1);
+    core.startBatch();
+    core.tickOnce(true);
+    for (int i = 0; i < 7; ++i) core.tickOnce(false);
+    CHECK(core.snapshot().active.empty());
+    core.tickOnce(true);
+    CHECK_EQ(core.snapshot().active.size(), size_t{1});
+}
+
+void testImmediateCoreRefill() {
+    for (const char* algorithm : {"fcfs", "rr"}) {
+        Config cfg = baseSchedulerConfig();
+        cfg.numCpu = 2;
+        cfg.scheduler = algorithm;
+        cfg.quantumCycles = 1;
+        SchedulerCore core(cfg, 1);
+        std::string error;
+        CHECK(core.addProcess("sleeper", program({sleepFor("3"), printDefault()}), error));
+        CHECK(core.addProcess("short", program({printDefault()}), error));
+        CHECK(core.addProcess("replacement1", program({printDefault(), printDefault()}), error));
+        CHECK(core.addProcess("replacement2", program({printDefault(), printDefault()}), error));
+        core.tickOnce();
+        const auto snapshot = core.snapshot();
+        CHECK_EQ(snapshot.cpuUtilization, 100);
+        CHECK_EQ(snapshot.coresUsed, 2);
+        CHECK(core.getProcessView("sleeper").process.state == ProcessState::WAITING);
+        CHECK(core.getProcessView("short").process.state == ProcessState::FINISHED);
+        for (const char* name : {"replacement1", "replacement2"}) {
+            const auto view = core.getProcessView(name).process;
+            CHECK(view.state == ProcessState::RUNNING);
+            CHECK(view.logs.empty()); // Dispatch must not execute an extra step.
+        }
+        core.tickOnce();
+        CHECK_EQ(core.getProcessView("replacement1").process.logs.size(), size_t{1});
+        CHECK_EQ(core.getProcessView("replacement2").process.logs.size(), size_t{1});
+        for (int i = 0; i < 10; ++i) core.tickOnce();
+        CHECK(core.snapshot().active.empty());
+        CHECK_EQ(core.snapshot().cpuUtilization, 0);
+    }
 }
 
 void testRandomPrograms() {
@@ -817,6 +890,8 @@ int main() {
     testBatchEndOfTick();
     testBatchSkipsExistingNames();
     testRandomPrograms();
+    testTimedBatchDrain();
+    testImmediateCoreRefill();
     testDelay();
     testSchedulerSleep();
     testSnapshot();
