@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
         "David Javier",
         "Tyrone Lee"
     };
-    ConsoleUI::printBanner(developers, "10-24-2026");
+    ConsoleUI::printBanner(developers, "11-05-2026");
 
     CommandInterpreter interpreter(tickMs, seed);
 
